@@ -1079,23 +1079,6 @@ early_param("pmem_adsp_size", pmem_adsp_size_setup);
 
 #define SND(desc, num) { .name = #desc, .id = num }
 static struct snd_endpoint snd_endpoints_list[] = {
-#if defined(CONFIG_BUILD_FOR_AOSP)
-	SND(HANDSET, 0),
-	SND(SPEAKER, 1),
-	SND(HEADSET,2),
-	SND(BT, 3),
-	SND(CARKIT, 3),
-	SND(TTY_FULL, 5),
-	SND(TTY_HEADSET, 5),
-	SND(TTY_VCO, 6),
-	SND(TTY_HCO, 7),
-	SND(NO_MIC_HEADSET, 8),
-	SND(FM_HEADSET, 9),
-	SND(HEADSET_AND_SPEAKER, 10),
-	SND(STEREO_HEADSET_AND_SPEAKER, 10),
-	SND(BT_EC_OFF, 44),
-	SND(CURRENT, 256),
-#else
 	SND(HANDSET, 0),
 	SND(MONO_HEADSET, 2),
 	SND(HEADSET, 3),
@@ -1112,7 +1095,6 @@ static struct snd_endpoint snd_endpoints_list[] = {
 	SND(CURRENT, 0x7FFFFFFE),
 	SND(FM_ANALOG_STEREO_HEADSET, 35),
 	SND(FM_ANALOG_STEREO_HEADSET_CODEC, 36),
-#endif
 };
 #undef SND
 
