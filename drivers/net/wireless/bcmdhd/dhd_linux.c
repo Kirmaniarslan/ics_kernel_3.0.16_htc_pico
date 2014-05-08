@@ -112,6 +112,14 @@ typedef struct histo_ {
 static histo_t vi_d1, vi_d2, vi_d3, vi_d4;
 #endif /* WLMEDIA_HTSF */
 
+/* Pkt filter for Rogers nat keep alive packet, we need change filter mode to filter out*/
+// packet filter for Rogers nat keep alive +++
+int filter_reverse = 1;
+module_param(filter_reverse, int, 0);
+#define DEFAULT_MAX_NUM_FILTERS	8
+int pkt_filter_element[DEFAULT_MAX_NUM_FILTERS] = {0};
+// packet filter for Rogers nat keep alive ---
+
 #if defined(SOFTAP)
 extern bool ap_cfg_running;
 extern bool ap_fw_loaded;
@@ -519,7 +527,7 @@ static int dhd_sleep_pm_callback(struct notifier_block *nfb, unsigned long actio
 {
 	int ret = NOTIFY_DONE;
 
-//#if (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 39))
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 39))
 	switch (action)	{
 		case PM_HIBERNATION_PREPARE:
 		case PM_SUSPEND_PREPARE:
@@ -533,7 +541,7 @@ static int dhd_sleep_pm_callback(struct notifier_block *nfb, unsigned long actio
 		break;
 	}
 	smp_mb();
-//#endif
+#endif
 	return ret;
 }
 
@@ -604,6 +612,11 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 	if (dhd && dhd->up) {
 		if (value && dhd->in_suspend) {
 
+// packet filter for Rogers nat keep alive +++
+		if (filter_reverse)
+			dhd_suspend_pktfilter(dhd, value);
+// packet filter for Rogers nat keep alive ---
+
 /* HTC_CSP_START */
 #ifdef BCM4329_LOW_POWER
 		if (LowPowerMode == 1) {
@@ -637,6 +650,10 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 			} else {
 
 /* HTC_CSP_START */
+// packet filter for Rogers nat keep alive +++
+				if (filter_reverse)
+					dhd_suspend_pktfilter(dhd, value);
+// packet filter for Rogers nat keep alive ---
 				dhdhtc_update_wifi_power_mode(is_screen_off);
 				dhdhtc_update_dtim_listen_interval(is_screen_off);
 /* HTC_CSP_END */
@@ -737,7 +754,7 @@ int dhd_set_keepalive(int value)
 static unsigned int dhdhtc_power_ctrl_mask = 0;
 int dhdcdc_power_active_while_plugin = 1;
 int dhdcdc_wifiLock = 0; /* to keep wifi power mode as PM_FAST and bcn_li_dtim as 0 */
-//extern int usb_get_connect_type(void); // msm72k_udc.c
+extern int usb_get_connect_type(void); // msm72k_udc.c
 
 int dhdhtc_update_wifi_power_mode(int is_screen_off)
 {
@@ -753,10 +770,10 @@ int dhdhtc_update_wifi_power_mode(int is_screen_off)
 		printf("power active. ctrl_mask: 0x%x\n", dhdhtc_power_ctrl_mask);
 		pm_type = PM_OFF;
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
-	//}  else if  (dhdcdc_power_active_while_plugin && usb_get_connect_type()) {
-		//printf("power active. usb_type:%d\n", usb_get_connect_type());
-		//pm_type = PM_OFF;
-		//dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
+	}  else if  (dhdcdc_power_active_while_plugin && usb_get_connect_type()) {
+		printf("power active. usb_type:%d\n", usb_get_connect_type());
+		pm_type = PM_OFF;
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
 	} else {
 		if (is_screen_off && !dhdcdc_wifiLock)
 			pm_type = PM_MAX;
@@ -2108,11 +2125,10 @@ static void dhd_watchdog(ulong data)
 	DHD_OS_WAKE_UNLOCK(&dhd->pub);
 }
 
-#if 0
 /* HTC_CSP_START */
-//extern int wlan_ioprio_idle;
-//static int prev_wlan_ioprio_idle=0;
-//static inline void set_wlan_ioprio(void)
+extern int wlan_ioprio_idle;
+static int prev_wlan_ioprio_idle=0;
+static inline void set_wlan_ioprio(void)
 {
         int ret, prio;
 
@@ -2124,10 +2140,8 @@ static void dhd_watchdog(ulong data)
         ret = set_task_ioprio(current, prio);
         DHD_DEFAULT(("set_wlan_ioprio: prio=0x%X, ret=%d\n", prio, ret));
 }
-
 /* HTC_CSP_END */
 
-#endif
 #ifdef DHDTHREAD
 static int
 dhd_dpc_thread(void *data)
@@ -2153,15 +2167,12 @@ dhd_dpc_thread(void *data)
 
 	/* Run until signal received */
 	while (1) {
-		#if 0
         /* HTC_CSP_START */
         if(prev_wlan_ioprio_idle != wlan_ioprio_idle){
             set_wlan_ioprio();
             prev_wlan_ioprio_idle = wlan_ioprio_idle;
         }
- 
         /* HTC_CSP_END */
-        #endif
 		if (down_interruptible(&tsk->sema) == 0) {
 			if (dhd->dhd_force_exit== TRUE)
 				break;
@@ -2646,9 +2657,9 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr, int cmd)
 #endif /* WLMEDIA_HTSF */
 
 	/* HTC_CSP_START*/
-	//if(buf!=NULL){
+	if(buf!=NULL){
 	bcmerror = dhd_wl_ioctl(&dhd->pub, ifidx, (wl_ioctl_t *)&ioc, buf, buflen);
-	//}
+	}
 	/* HTC_CSP_END*/
 done:
 	dhd_check_hang(net, &dhd->pub, bcmerror);
@@ -3523,6 +3534,8 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 #ifdef GET_CUSTOM_MAC_ENABLE
 	struct ether_addr ea_addr;
 #endif /* GET_CUSTOM_MAC_ENABLE */
+	uint srl = 15;
+	uint lrl = 15;
 
 	DHD_TRACE(("Enter %s\n", __func__));
 	dhd->op_mode = 0;
@@ -3745,6 +3758,11 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 		}
 	}
 
+// packet filter for Rogers nat keep alive +++
+	if (filter_reverse)
+		dhd_set_pktfilter(dhd, 1, DENY_NAT_KEEP_ALIVE, 26, "0xFFFF0000000000000000FFFFFFFF", "0xC123880000000000000011940009");
+// packet filter for Rogers nat keep alive ---
+
 #if defined(KEEP_ALIVE)
 	{
 	/* Set Keep Alive : be sure to use FW with -keepalive */
@@ -3911,6 +3929,10 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 	ret = 1;
 	bcm_mkiovar("tc_enable", (char *)&ret, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+
+	/* set srl and lrl */
+	dhd_wl_ioctl_cmd(dhd, WLC_SET_SRL, (char *)&srl, sizeof(srl), TRUE, 0);
+	dhd_wl_ioctl_cmd(dhd, WLC_SET_LRL, (char *)&lrl, sizeof(lrl), TRUE, 0);
 /* HTC_CSP_END */
 
 done:
@@ -6095,4 +6117,71 @@ int dhd_get_txrx_stats(struct net_device *net, unsigned long *rx_packets, unsign
 
 	return 0;
 }
+
+// packet filter for Rogers nat keep alive +++
+void dhd_suspend_pktfilter(dhd_pub_t * dhd, int suspend)
+{
+	wl_pkt_filter_enable_t	enable_parm;
+	int i, pkt_id = 0;
+	char buf[256];
+	uint filter_mode = 0;
+
+	printk("Enter set packet filter in %s\n", suspend?"suspend":"resume");
+
+	/* when suspend, enable id > 200, disable id < 200. vice vesa */
+
+	if (suspend) {
+		for (i = 0; i < DEFAULT_MAX_NUM_FILTERS; i++) {
+			pkt_id = pkt_filter_element[i];
+			if (pkt_id) {
+				if (pkt_id < 200) {
+					/* disable it!! */
+					enable_parm.id = htod32(pkt_id);
+					enable_parm.enable = htod32(0);
+					bcm_mkiovar("pkt_filter_enable", (char *)&enable_parm,
+						sizeof(wl_pkt_filter_enable_t), buf, sizeof(buf));
+					dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
+				} else {
+					/* enable it!! */
+					enable_parm.id = htod32(pkt_id);
+					enable_parm.enable = htod32(1);
+					bcm_mkiovar("pkt_filter_enable", (char *)&enable_parm,
+						sizeof(wl_pkt_filter_enable_t), buf, sizeof(buf));
+					dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
+				}
+			}
+		}
+
+		bcm_mkiovar("pkt_filter_mode", (char *)&filter_mode, 4, buf, sizeof(buf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
+	} else {
+		for (i = 0; i < DEFAULT_MAX_NUM_FILTERS; i++) {
+			pkt_id = pkt_filter_element[i];
+			if (pkt_id) {
+				if (pkt_id >= 200) {
+					/* disable it!! */
+					enable_parm.id = htod32(pkt_id);
+					enable_parm.enable = htod32(0);
+					bcm_mkiovar("pkt_filter_enable", (char *)&enable_parm,
+						sizeof(wl_pkt_filter_enable_t), buf, sizeof(buf));
+					dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
+				} else {
+					/* enable it!! */
+					enable_parm.id = htod32(pkt_id);
+					enable_parm.enable = htod32(1);
+					bcm_mkiovar("pkt_filter_enable", (char *)&enable_parm,
+						sizeof(wl_pkt_filter_enable_t), buf, sizeof(buf));
+					dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
+				}
+			}
+		}
+
+		filter_mode = 1;
+		bcm_mkiovar("pkt_filter_mode", (char *)&filter_mode, 4, buf, sizeof(buf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
+	}
+
+	return;
+}
+// packet filter for Rogers nat keep alive ---
 /* HTC_CSP_END */

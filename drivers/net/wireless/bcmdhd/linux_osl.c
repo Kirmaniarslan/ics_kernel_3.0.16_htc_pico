@@ -48,10 +48,6 @@
 #define BCM_MEM_FILENAME_LEN 	24		
 
 #ifdef DHD_USE_STATIC_BUF
-#define DHD_SKB_HDRSIZE 		336
-#define DHD_SKB_1PAGE_BUFSIZE	((PAGE_SIZE*1)-DHD_SKB_HDRSIZE)
-#define DHD_SKB_2PAGE_BUFSIZE	((PAGE_SIZE*2)-DHD_SKB_HDRSIZE)
-#define DHD_SKB_4PAGE_BUFSIZE	((PAGE_SIZE*4)-DHD_SKB_HDRSIZE)
 #define STATIC_BUF_MAX_NUM	16
 #define STATIC_BUF_SIZE		(PAGE_SIZE * 2)
 #define STATIC_BUF_TOTAL_LEN	(STATIC_BUF_MAX_NUM * STATIC_BUF_SIZE)
@@ -65,23 +61,12 @@ typedef struct bcm_static_buf {
 static bcm_static_buf_t *bcm_static_buf = 0;
 
 #define STATIC_PKT_MAX_NUM	8
-#if defined(ENHANCED_STATIC_BUF)
-#define STATIC_PKT_4PAGE_NUM	1
-#define DHD_SKB_MAX_BUFSIZE	DHD_SKB_4PAGE_BUFSIZE
-#else
-#define STATIC_PKT_4PAGE_NUM	0
-#define DHD_SKB_MAX_BUFSIZE DHD_SKB_4PAGE_BUFSIZE
-//#define DHD_SKB_MAX_BUFSIZE DHD_SKB_2PAGE_BUFSIZE
-#endif 
 
 typedef struct bcm_static_pkt {
+	struct sk_buff *skb_4k[STATIC_PKT_MAX_NUM];
 	struct sk_buff *skb_8k[STATIC_PKT_MAX_NUM];
-	struct sk_buff *skb_16k[STATIC_PKT_MAX_NUM];
-#ifdef ENHANCED_STATIC_BUF
-	struct sk_buff *skb_16k;
-#endif
 	struct semaphore osl_pkt_sem;
-	unsigned char pkt_use[STATIC_PKT_MAX_NUM * 2 + STATIC_PKT_4PAGE_NUM];
+	unsigned char pkt_use[STATIC_PKT_MAX_NUM * 2];
 } bcm_static_pkt_t;
 
 static bcm_static_pkt_t *bcm_static_skb = 0;
@@ -577,33 +562,20 @@ osl_pktfree(osl_t *osh, void *p, bool send)
 }
 
 #ifdef DHD_USE_STATIC_BUF
-
-//HTC_CSP_START
-extern int htc_downloading_image_flag;
-//HTC_CSP_END
-
 void *
 osl_pktget_static(osl_t *osh, uint len)
 {
-	int i = 0;
+	int i;
 	struct sk_buff *skb;
 
-	if (len > DHD_SKB_MAX_BUFSIZE) {
-		printk("osl_pktget_static: Do we really need this big skb??"
-			" len=%d\n", len);
-	        dump_stack();
-
-		//HTC_CSP_START
-		if (htc_downloading_image_flag)
-			return NULL;
-		else
-		//HTC_CSP_END
-			return osl_pktget(osh, len);
+	if (len > (PAGE_SIZE * 2)) {
+		printf("%s: attempt to allocate huge packet (0x%x)\n", __FUNCTION__, len);
+		return osl_pktget(osh, len);
 	}
 
 	down(&bcm_static_skb->osl_pkt_sem);
 
-	if (len <= DHD_SKB_2PAGE_BUFSIZE) {
+	if (len <= PAGE_SIZE) {
 		for (i = 0; i < STATIC_PKT_MAX_NUM; i++) {
 			if (bcm_static_skb->pkt_use[i] == 0)
 				break;
@@ -611,35 +583,28 @@ osl_pktget_static(osl_t *osh, uint len)
 
 		if (i != STATIC_PKT_MAX_NUM) {
 			bcm_static_skb->pkt_use[i] = 1;
-
-			skb = bcm_static_skb->skb_8k[i];
+			up(&bcm_static_skb->osl_pkt_sem);
+			skb = bcm_static_skb->skb_4k[i];
 			skb->tail = skb->data + len;
 			skb->len = len;
-			up(&bcm_static_skb->osl_pkt_sem);
-			return skb;
-		}
-	}
-
-	if (len <= DHD_SKB_4PAGE_BUFSIZE) {
-
-		for (i = 0; i < STATIC_PKT_MAX_NUM; i++) {
-			if (bcm_static_skb->pkt_use[i + STATIC_PKT_MAX_NUM]
-				== 0)
-				break;
-		}
-
-		if (i != STATIC_PKT_MAX_NUM) {
-			bcm_static_skb->pkt_use[i + STATIC_PKT_MAX_NUM] = 1;
-			skb = bcm_static_skb->skb_16k[i];
-			skb->tail = skb->data + len;
-			skb->len = len;
-
-			up(&bcm_static_skb->osl_pkt_sem);
 			return skb;
 		}
 	}
 
 
+	for (i = 0; i < STATIC_PKT_MAX_NUM; i++) {
+		if (bcm_static_skb->pkt_use[i+STATIC_PKT_MAX_NUM] == 0)
+			break;
+	}
+
+	if (i != STATIC_PKT_MAX_NUM) {
+		bcm_static_skb->pkt_use[i+STATIC_PKT_MAX_NUM] = 1;
+		up(&bcm_static_skb->osl_pkt_sem);
+		skb = bcm_static_skb->skb_8k[i];
+		skb->tail = skb->data + len;
+		skb->len = len;
+		return skb;
+	}
 
 	up(&bcm_static_skb->osl_pkt_sem);
 	printf("%s: all static pkt in use!\n", __FUNCTION__);
@@ -651,10 +616,9 @@ osl_pktfree_static(osl_t *osh, void *p, bool send)
 {
 	int i;
 
-
-	down(&bcm_static_skb->osl_pkt_sem);
 	for (i = 0; i < STATIC_PKT_MAX_NUM; i++) {
-		if (p == bcm_static_skb->skb_8k[i]) {
+		if (p == bcm_static_skb->skb_4k[i]) {
+			down(&bcm_static_skb->osl_pkt_sem);
 			bcm_static_skb->pkt_use[i] = 0;
 			up(&bcm_static_skb->osl_pkt_sem);
 			return;
@@ -662,17 +626,15 @@ osl_pktfree_static(osl_t *osh, void *p, bool send)
 	}
 
 	for (i = 0; i < STATIC_PKT_MAX_NUM; i++) {
-		if (p == bcm_static_skb->skb_16k[i]) {
+		if (p == bcm_static_skb->skb_8k[i]) {
+			down(&bcm_static_skb->osl_pkt_sem);
 			bcm_static_skb->pkt_use[i + STATIC_PKT_MAX_NUM] = 0;
 			up(&bcm_static_skb->osl_pkt_sem);
 			return;
 		}
 	}
 
-	up(&bcm_static_skb->osl_pkt_sem);
-
-	osl_pktfree(osh, p, send);
-	return;
+	return osl_pktfree(osh, p, send);
 }
 #endif 
 

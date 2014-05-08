@@ -120,7 +120,7 @@ u32 wl_dbg_level = WL_DBG_ERR ;
 /* Set this to 1 to use a seperate interface (p2p0)
  *  for p2p operations.
  */
-#define ENABLE_P2P_INTERFACE	0
+#define ENABLE_P2P_INTERFACE	1
 
 /* This is to override regulatory domains defined in cfg80211 module (reg.c)
  * By default world regulatory domain defined in reg.c puts the flags NL80211_RRF_PASSIVE_SCAN
@@ -1257,12 +1257,6 @@ static void wl_scan_prep(struct wl_scan_params *params, struct cfg80211_scan_req
 	if (!request)
 		return;
 
-	//broadcom: check request magic word is OK
-	if (request->magic != SCAN_REQUEST_MAGIC) {
-		printf("%s: request magic has been changed.\n", __func__);
-		return;
-	}
-
 	n_ssids = request->n_ssids;
 	n_channels = request->n_channels;
 
@@ -1433,8 +1427,7 @@ wl_run_escan(struct wl_priv *wl, struct net_device *ndev,
 		/* LEGACY SCAN TRIGGER */
 		WL_SCAN((" LEGACY E-SCAN START\n"));
 
-		//broadcom: check request magic word is OK
-		if (is_scan_request_valid(request)) {
+		if (request != NULL) {
 			n_channels = request->n_channels;
 			n_ssids = request->n_ssids;
 			/* Allocate space for populating ssids in wl_iscan_params struct */
@@ -1595,8 +1588,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 	mod_timer(&wl->scan_timeout, jiffies + WL_SCAN_TIMER_INTERVAL_MS * HZ / 1000);
 	iscan_req = false;
 	wl->scan_request = request;
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(request)) {		/* scan bss */
+	if (request) {		/* scan bss */
 		ssids = request->ssids;
 		if (wl->iscan_on && (!ssids || !ssids->ssid_len || request->n_ssids != 1)) {
 			iscan_req = true;
@@ -1749,8 +1741,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 
 scan_out:
 	wl_clr_drv_status(wl, SCANNING, ndev);
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		cfg80211_scan_done(wl->scan_request, true);
 		wl->scan_request = NULL;
 	}
@@ -1871,8 +1862,7 @@ wl_cfg80211_join_ibss(struct wiphy *wiphy, struct net_device *dev,
 	/*
 	 * Cancel ongoing scan to sync up with sme state machine of cfg80211.
 	 */
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		wl_notify_escan_complete(wl, dev, true, true);
 	}
 	if (params->bssid) {
@@ -2359,8 +2349,7 @@ wl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 	/*
 	 * Cancel ongoing scan to sync up with sme state machine of cfg80211.
 	 */
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		wl_notify_escan_complete(wl, dev, true, true);
 	}
 	/* Clean BSSID */
@@ -2631,8 +2620,7 @@ wl_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 		/*
 		* Cancel ongoing scan to sync up with sme state machine of cfg80211.
 		*/
-		//broadcom: check request magic word is OK
-		if (is_scan_request_valid(wl->scan_request)) {
+		if (wl->scan_request) {
 			wl_notify_escan_complete(wl, dev, true, true);
 		}
 		wl_set_drv_status(wl, DISCONNECTING, dev);
@@ -2740,7 +2728,7 @@ wl_cfg80211_config_default_key(struct wiphy *wiphy, struct net_device *dev,
 		WL_ERR(("WLC_GET_WSEC error (%d)\n", err));
 		return err;
 	}
-	if (wsec & WEP_ENABLED) {
+	if (wsec == WEP_ENABLED) {
 		/* Just select a new current key */
 		index = (u32) key_idx;
 		index = htod32(index);
@@ -3258,8 +3246,7 @@ static s32 wl_cfg80211_suspend(struct wiphy *wiphy)
 		wl_set_drv_status(wl, SCAN_ABORTING, iter->ndev);
 	wl_term_iscan(wl);
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		cfg80211_scan_done(wl->scan_request, true);
 		wl->scan_request = NULL;
 	}
@@ -3838,7 +3825,7 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, struct net_device *ndev,
 	cfg80211_mgmt_tx_status(ndev, *cookie, buf, len, ack, GFP_KERNEL);
 	/*HTC_CSP_START*/
 	if(act_frm != NULL){
-		if (act_frm->subtype == P2P_PAF_GON_CONF) {
+		if (act_frm && act_frm->subtype == P2P_PAF_GON_CONF) {
 #ifdef FORCE_MPC
 		if (!strstr(firmware_path, "_p2p"))
 #endif
@@ -5018,8 +5005,7 @@ wl_notify_connect_status(struct wl_priv *wl, struct net_device *ndev,
 			}
 
 		} else if (wl_is_linkdown(wl, e)) {
-			//broadcom: check request magic word is OK
-			if (is_scan_request_valid(wl->scan_request)) {
+			if (wl->scan_request) {
 				if (wl->escan_on) {
 					wl_notify_escan_complete(wl, ndev, true, true);
 				} else {
@@ -5054,8 +5040,7 @@ wl_notify_connect_status(struct wl_priv *wl, struct net_device *ndev,
 			printf("connect failed event=%d e->status 0x%x\n",
 				event, (int)ntoh32(e->status));
 			/* Clean up any pending scan request */
-			//broadcom: check request magic word is OK
-			if (is_scan_request_valid(wl->scan_request)) {
+			if (wl->scan_request) {
 				if (wl->escan_on) {
 					wl_notify_escan_complete(wl, ndev, true, true);
 				} else {
@@ -5331,8 +5316,7 @@ wl_bss_connect_done(struct wl_priv *wl, struct net_device *ndev,
 	u8 *curbssid = wl_read_prof(wl, ndev, WL_PROF_BSSID);
 
 	WL_DBG((" enter\n"));
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		wl_notify_escan_complete(wl, ndev, true, true);
 	}
 	if (wl_get_drv_status(wl, CONNECTING, ndev)) {
@@ -5433,8 +5417,7 @@ wl_notify_scan_status(struct wl_priv *wl, struct net_device *ndev,
 scan_done_out:
 	del_timer_sync(&wl->scan_timeout);
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		WL_DBG(("cfg80211_scan_done\n"));
 		cfg80211_scan_done(wl->scan_request, false);
 		wl->scan_request = NULL;
@@ -5563,8 +5546,8 @@ wl_notify_rx_mgmt_frame(struct wl_priv *wl, struct net_device *ndev,
 		 */
 		/*HTC_CSP_START*/
 		if(act_frm != NULL){
-			if ((act_frm->subtype == P2P_PAF_GON_CONF) ||
-			(act_frm->subtype == P2P_PAF_PROVDIS_RSP)) {
+			if (act_frm &&((act_frm->subtype == P2P_PAF_GON_CONF) ||
+			(act_frm->subtype == P2P_PAF_PROVDIS_RSP))) {
 #ifdef FORCE_MPC
 				if (!strstr(firmware_path, "_p2p"))
 #endif
@@ -5813,8 +5796,7 @@ static void wl_notify_iscan_complete(struct wl_iscan_ctrl *iscan, bool aborted)
 	}
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
 	wl_clr_drv_status(wl, SCANNING, ndev);
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (likely(wl->scan_request)) {
 		cfg80211_scan_done(wl->scan_request, aborted);
 		wl->scan_request = NULL;
 	}
@@ -5964,8 +5946,7 @@ static void wl_scan_timeout(unsigned long data)
 	struct wl_priv *wl = (struct wl_priv *)data;
 	struct net_device *ndev = wl_to_prmry_ndev(wl);
 
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		WL_ERR(("timer expired\n"));
 		scan_timeout_num++;
 		if (scan_timeout_num > MAX_SCAN_TIMEOUT_FAIL)
@@ -6065,8 +6046,7 @@ static s32 wl_notify_escan_complete(struct wl_priv *wl,
 
 	WL_DBG(("Enter \n"));
 
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		if (wl->scan_request->dev == wl->p2p_net)
 			dev = wl_to_prmry_ndev(wl);
 		else
@@ -6095,8 +6075,7 @@ static s32 wl_notify_escan_complete(struct wl_priv *wl,
 	if (timer_pending(&wl->scan_timeout))
 		del_timer_sync(&wl->scan_timeout);
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (likely(wl->scan_request)) {
 		cfg80211_scan_done(wl->scan_request, aborted);
 		wl->scan_request = NULL;
 	}
@@ -6224,8 +6203,7 @@ static s32 wl_escan_handler(struct wl_priv *wl,
 			wl_clr_drv_status(wl, SCANNING, wl->afx_hdl->dev);
 			if (wl->afx_hdl->peer_chan == WL_INVALID)
 				complete(&wl->act_frm_scan);
-		//broadcom: check request magic word is OK
-		} else if (is_scan_request_valid(wl->scan_request)) {
+		} else if (likely(wl->scan_request)) {
 			mutex_lock(&wl->usr_sync);
 			WL_INFO(("ESCAN COMPLETED\n"));
 			wl->bss_list = (wl_scan_results_t *)wl->escan_info.escan_buf;
@@ -6244,8 +6222,7 @@ static s32 wl_escan_handler(struct wl_priv *wl,
 			wl_clr_p2p_status(wl, SCANNING);
 			if (wl->afx_hdl->peer_chan == WL_INVALID)
 				complete(&wl->act_frm_scan);
-		//broadcom: check request magic word is OK
-		} else if (is_scan_request_valid(wl->scan_request)) {
+		} else if (likely(wl->scan_request)) {
 			mutex_lock(&wl->usr_sync);
 			WL_INFO(("ESCAN ABORTED\n"));
 			wl->bss_list = (wl_scan_results_t *)wl->escan_info.escan_buf;
@@ -6265,8 +6242,7 @@ static s32 wl_escan_handler(struct wl_priv *wl,
 			wl_clr_drv_status(wl, SCANNING, wl->afx_hdl->dev);
 			if (wl->afx_hdl->peer_chan == WL_INVALID)
 				complete(&wl->act_frm_scan);
-		//broadcom: check request magic word is OK
-		} else if (is_scan_request_valid(wl->scan_request)) {
+		} else if (likely(wl->scan_request)) {
 			mutex_lock(&wl->usr_sync);
 			del_timer_sync(&wl->scan_timeout);
 			wl->bss_list = (wl_scan_results_t *)wl->escan_info.escan_buf;
@@ -7018,8 +6994,7 @@ static s32 __wl_cfg80211_down(struct wl_priv *wl)
 
 	wl_term_iscan(wl);
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
-	//broadcom: check request magic word is OK
-	if (is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		cfg80211_scan_done(wl->scan_request, true);
 		wl->scan_request = NULL;
 	}

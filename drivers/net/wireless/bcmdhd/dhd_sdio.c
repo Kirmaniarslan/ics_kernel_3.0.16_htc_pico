@@ -5970,10 +5970,6 @@ err:
 }
 #endif /* BCMEMBEDIMAGE */
 
-//HTC_CSP_START
-int htc_downloading_image_flag = 0;
-//HTC_CSP_END
-
 static int
 dhdsdio_download_code_file(struct dhd_bus *bus, char *pfw_path)
 {
@@ -5997,15 +5993,8 @@ dhdsdio_download_code_file(struct dhd_bus *bus, char *pfw_path)
 	if ((uint32)(uintptr)memblock % DHD_SDALIGN)
 		memptr += (DHD_SDALIGN - ((uint32)(uintptr)memblock % DHD_SDALIGN));
 
-	htc_downloading_image_flag = 1;  //HTC_CSP
-
 	/* Download image */
 	while ((len = dhd_os_get_image_block((char*)memptr, MEMBLOCK, image))) {
-
-		//HTC_CSP_START
-		if (MEMBLOCK != 2048 || len > MEMBLOCK) printk("%s, MEMBLOCK=%d, len=%d\n", __func__, MEMBLOCK, len);
-		//HTC_CSP_END
-
 		bcmerror = dhdsdio_membytes(bus, TRUE, offset, memptr, len);
 		if (bcmerror) {
 			DHD_ERROR(("%s: error %d on writing %d membytes at 0x%08x\n",
@@ -6017,8 +6006,6 @@ dhdsdio_download_code_file(struct dhd_bus *bus, char *pfw_path)
 	}
 
 err:
-	htc_downloading_image_flag = 0;  //HTC_CSP
-
 	if (memblock)
 		MFREE(bus->dhd->osh, memblock, MEMBLOCK + DHD_SDALIGN);
 
