@@ -2772,7 +2772,7 @@ static void __init pico_init(void)
 
 
 	pico_init_keypad();
-	msm_init_pmic_vibrator();
+	msm_init_pmic_vibrator(3000);
 
 	if (get_kernel_flag() & KERNEL_FLAG_PM_MONITOR) {
 		htc_monitor_init();
@@ -2797,4 +2797,3 @@ MACHINE_START(PICO, "pico")
 	.init_machine	= pico_init,
 	.timer		= &msm_timer,
 MACHINE_END
-
