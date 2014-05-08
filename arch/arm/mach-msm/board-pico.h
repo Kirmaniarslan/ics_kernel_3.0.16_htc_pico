@@ -37,8 +37,10 @@ int __init pico_wifi_init(void);
 #define MSM_RAM_CONSOLE_BASE    0x2FD00000
 #define MSM_RAM_CONSOLE_SIZE    MSM_HTC_RAM_CONSOLE_SIZE
 
-#define MSM_PMEM_MDP_SIZE       0x01400000
-#define MSM_PMEM_ADSP_SIZE      0x00D00000
+#define MSM_PMEM_MDP_SIZE       0x2F00000 /* 0x01400000 => 0x2F00000 */
+#define MSM_PMEM_ADSP_SIZE      0x3300000 /* 0x00D00000 => 0x3300000 */
+#define PMEM_KERNEL_EBI1_SIZE	0x3A000
+#define MSM_PMEM_AUDIO_SIZE	0x1F4000 /* 0x5B000 => 0x1F4000 */
 
 #define PICO_GPIO_TO_INT(x)           (x+64) /* from gpio_to_irq */
 
@@ -120,7 +122,11 @@ int __init pico_wifi_init(void);
 #define PICO_GPIO_BT_RESET_N          (90)
 #define PICO_GPIO_BT_HOST_WAKE        (112)
 #define PICO_GPIO_BT_CHIP_WAKE        (122)
-#define PICO_GPIO_BT_SD_N             (123)
+#define PICO_GPIO_BT_SHUTDOWN_N        (123)
+#define PICO_GPIO_BT_PCM_OUT           (127)
+#define PICO_GPIO_BT_PCM_IN            (128)
+#define PICO_GPIO_BT_PCM_SYNC          (129)
+#define PICO_GPIO_BT_PCM_CLK           (130)
 
 /* Touch Panel */
 #define PICO_GPIO_TP_ATT_N            (18)
@@ -144,5 +150,11 @@ int __init pico_wifi_init(void);
 #define PICO_GPIO_LCM_1v8_EN             (5)
 #define PICO_GPIO_LCM_2v85_EN             (6)
 
+/* NFC */
+#define PICO_GPIO_NFC_VEN	(8)
+#define PICO_GPIO_NFC_INT		(27)
+#define PICO_GPIO_NFC_DL	(7)
+
 #endif /* GUARD */
+
 
