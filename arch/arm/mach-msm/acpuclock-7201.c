@@ -366,7 +366,7 @@ static struct clkctl_acpu_speed pll0_960_pll1_245_pll2_1200_pll4_800_25a[] = {
 	{ 0, 400000, ACPU_PLL_2, 2, 2, 50000, 3, 4, 122880 },
 	{ 1, 480000, ACPU_PLL_0, 4, 1, 60000, 3, 5, 122880 },
 	{ 1, 600000, ACPU_PLL_2, 2, 1, 75000, 3, 6, 200000 },
-#ifdef CONFIG_MSM_CPU_FREQ_OVERCLOCK
+
 	/* BEGIN overclocked frequencies */
     { 1, 678000, ACPU_PLL_2, 2, 1, 80000, 3, 6, 200000 },
     { 1, 722000, ACPU_PLL_2, 2, 1, 85000, 3, 6, 200000 },
@@ -377,7 +377,7 @@ static struct clkctl_acpu_speed pll0_960_pll1_245_pll2_1200_pll4_800_25a[] = {
     { 1, 844000, ACPU_PLL_2, 2, 1, 102000, 3, 7, 200000 },
 	{ 1, 878000, ACPU_PLL_2, 2, 1, 104000, 3, 7, 200000 },
     /* END overclocked frequencies */
-#endif
+
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0} }
 };
 

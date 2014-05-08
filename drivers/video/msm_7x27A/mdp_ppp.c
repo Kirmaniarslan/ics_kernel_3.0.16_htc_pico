@@ -1348,7 +1348,7 @@ void put_img(struct file *p_src_file, struct ion_handle *p_ihdl)
 
 int mdp_ppp_blit(struct fb_info *info, struct mdp_blit_req *req)
 {
-	unsigned long src_start, dst_start;
+	unsigned long src_start = 0, dst_start = 0;
 	unsigned long src_len = 0;
 	unsigned long dst_len = 0;
 	struct ion_handle *src_ihdl = NULL;
@@ -1394,8 +1394,12 @@ int mdp_ppp_blit(struct fb_info *info, struct mdp_blit_req *req)
 	iBuf.bpp = bytes_per_pixel[req->dst.format];
 
 	iBuf.ibuf_type = req->dst.format;
-	iBuf.buf = (uint8 *) dst_start;
-	iBuf.buf += req->dst.offset;
+	if (dst_start) {
+		iBuf.buf = (uint8 *) dst_start;
+		iBuf.buf += req->dst.offset;
+	} else {
+		iBuf.buf = NULL;
+	}
 
 	iBuf.roi.lcd_x = req->dst_rect.x;
 	iBuf.roi.lcd_y = req->dst_rect.y;
@@ -1410,17 +1414,22 @@ int mdp_ppp_blit(struct fb_info *info, struct mdp_blit_req *req)
 	iBuf.mdpImg.width = req->src.width;
 	iBuf.mdpImg.imgType = req->src.format;
 
-	iBuf.mdpImg.bmy_addr = (uint32 *) (src_start + req->src.offset);
+	if (src_start) {
+		iBuf.mdpImg.bmy_addr = (uint32 *) (src_start + req->src.offset);
 
-	if (iBuf.mdpImg.imgType == MDP_Y_CBCR_H2V2_ADRENO)
-		iBuf.mdpImg.cbcr_addr =
-			(uint32 *) ((uint32) iBuf.mdpImg.bmy_addr +
-				ALIGN((ALIGN(req->src.width, 32) *
-				ALIGN(req->src.height, 32)), 4096));
-	else
-		iBuf.mdpImg.cbcr_addr =
-			(uint32 *) ((uint32) iBuf.mdpImg.bmy_addr +
-				req->src.width * req->src.height);
+		if (iBuf.mdpImg.imgType == MDP_Y_CBCR_H2V2_ADRENO)
+			iBuf.mdpImg.cbcr_addr =
+				(uint32 *) ((uint32) iBuf.mdpImg.bmy_addr +
+					ALIGN((ALIGN(req->src.width, 32) *
+					ALIGN(req->src.height, 32)), 4096));
+		else
+			iBuf.mdpImg.cbcr_addr =
+				(uint32 *) ((uint32) iBuf.mdpImg.bmy_addr +
+					req->src.width * req->src.height);
+	} else {
+		iBuf.mdpImg.bmy_addr = NULL;
+		iBuf.mdpImg.cbcr_addr = NULL;
+	}
 
 	iBuf.mdpImg.mdpOp = MDPOP_NOP;
 
