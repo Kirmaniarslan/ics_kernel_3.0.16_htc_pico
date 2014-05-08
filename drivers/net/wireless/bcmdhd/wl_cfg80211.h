@@ -675,4 +675,8 @@ extern s32 wl_cfg80211_deauth_sta(struct net_device *net, char* buf, int len);
 extern s32 wl_cfg80211_scan_abort(struct wl_priv *wl, struct net_device *ndev);
 
 extern s32 wl_cfg80211_if_is_group_owner(void);
+
+/* broadcom: check request magic word is OK */
+#define is_scan_request_valid(request) ((request != NULL) && (((struct cfg80211_scan_request *)request)->magic == SCAN_REQUEST_MAGIC))
+
 #endif				/* _wl_cfg80211_h_ */

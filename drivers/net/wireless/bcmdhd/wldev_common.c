@@ -392,7 +392,7 @@ get_channel_retry:
 	ci.scan_channel = dtoh32(ci.scan_channel);
 	if (ci.scan_channel) {
 		retry++;
-		WLDEV_ERROR(("%s: scan in progress, retry %d!\n", __FUNCTION__, retry));
+		printf("%s: scan in progress, retry %d!\n", __FUNCTION__, retry);
 		if (retry > 3)
 			return -EBUSY;
 		bcm_mdelay(1000);
@@ -427,7 +427,7 @@ get_channel_retry:
 				return error;
 			}
 			/* if NULL, set default country code instead and set country code again */
-			WLDEV_ERROR(("%s: channel_count = %d\n", __FUNCTION__, list->count));
+			printf("%s: channel_count = %d\n", __FUNCTION__, list->count);
 			if (list->count == 0) {
 				strcpy(country_code, DEF_COUNTRY_CODE);
 				retry = 0;
