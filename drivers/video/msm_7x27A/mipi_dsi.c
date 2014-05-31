@@ -1,4 +1,8 @@
-/* Copyright (c) 2008-2011, Code Aurora Forum. All rights reserved.
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
+/* Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
+=======
+/* Copyright (c) 2008-2013, The Linux Foundation. All rights reserved.
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,8 +33,10 @@
 #include <mach/hardware.h>
 #include <mach/gpio.h>
 #include <mach/clk.h>
-#include <mach/msm_iomap.h>
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
 #include <mach/debug_display.h>
+=======
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 
 #include "msm_fb.h"
 #include "mipi_dsi.h"
@@ -40,6 +46,7 @@
 #include <mach/panel_id.h>
 
 u32 dsi_irq;
+u32 esc_byte_ratio;
 
 static boolean tlmm_settings = FALSE;
 
@@ -48,6 +55,8 @@ static int mipi_dsi_remove(struct platform_device *pdev);
 
 static int mipi_dsi_off(struct platform_device *pdev);
 static int mipi_dsi_on(struct platform_device *pdev);
+static int mipi_dsi_fps_level_change(struct platform_device *pdev,
+					u32 fps_level);
 
 static struct platform_device *pdev_list[MSM_FB_MAX_DEV_LIST];
 static int pdev_list_cnt;
@@ -66,6 +75,7 @@ static struct platform_driver mipi_dsi_driver = {
 
 struct device dsi_dev;
 
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
 int mipi_status = 1;
 struct mutex cmdlock;
 int bl_level_prevset = 0;
@@ -74,14 +84,21 @@ struct dsi_cmd_desc *mipi_power_off_cmd = NULL;
 int mipi_power_on_cmd_size = 0;
 int mipi_power_off_cmd_size = 0;
 char ptype[60] = "Panel Type = ";
+=======
+static int mipi_dsi_fps_level_change(struct platform_device *pdev,
+					u32 fps_level)
+{
+	mipi_dsi_wait4video_done();
+	mipi_dsi_configure_fb_divider(fps_level);
+	return 0;
+}
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 
 static int mipi_dsi_off(struct platform_device *pdev)
 {
 	int ret = 0;
 	struct msm_fb_data_type *mfd;
 	struct msm_panel_info *pinfo;
-
-	PR_DISP_DEBUG(" %s\n", __func__);
 
 	mfd = platform_get_drvdata(pdev);
 	pinfo = &mfd->panel_info;
@@ -93,25 +110,27 @@ static int mipi_dsi_off(struct platform_device *pdev)
 
 	mdp4_overlay_dsi_state_set(ST_DSI_SUSPEND);
 
-	/*
-	 * Description: dsi clock is need to perform shutdown.
-	 * mdp4_dsi_cmd_dma_busy_wait() will enable dsi clock if disabled.
-	 * also, wait until dma (overlay and dmap) finish.
-	 */
+	mipi_dsi_clk_cfg(1);
+
+	
+	mipi_dsi_cmd_mdp_busy();
+
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
+=======
 	if (mfd->panel_info.type == MIPI_CMD_PANEL) {
-		if (mdp_rev >= MDP_REV_41) {
-			mdp4_dsi_cmd_dma_busy_wait(mfd);
-			mdp4_dsi_blt_dmap_busy_wait(mfd);
-			mipi_dsi_mdp_busy_wait(mfd);
-		} else {
-			mdp3_dsi_cmd_dma_busy_wait(mfd);
-		}
+		mipi_dsi_prepare_ahb_clocks();
+		mipi_dsi_ahb_ctrl(1);
+		mipi_dsi_clk_enable();
+
+		/* make sure dsi_cmd_mdp is idle */
+		mipi_dsi_cmd_mdp_busy();
 	}
 
 	/*
 	 * Desctiption: change to DSI_CMD_MODE since it needed to
 	 * tx DCS dsiplay off comamnd to panel
 	 */
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 	mipi_dsi_op_mode_config(DSI_CMD_MODE);
 
 	if (mfd->panel_info.type == MIPI_CMD_PANEL) {
@@ -124,25 +143,41 @@ static int mipi_dsi_off(struct platform_device *pdev)
 		}
 	}
 
-	ret = panel_next_off(pdev);
+	if (panel_type != PANEL_ID_PROTOU_LG && panel_type != PANEL_ID_PROTODCG_LG)
+		ret = panel_next_off(pdev);
 
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
 #ifdef CONFIG_MSM_BUS_SCALING
 	mdp_bus_scale_update_request(0);
 #endif
 
-	local_bh_disable();
+	spin_lock_bh(&dsi_clk_lock);
 	mipi_dsi_clk_disable();
-	local_bh_enable();
+
+	
+	MIPI_OUTP(MIPI_DSI_BASE + 0x0000, 0);
+
+	mipi_dsi_phy_ctrl(0);
+
+=======
+	spin_lock_bh(&dsi_clk_lock);
+
+	mipi_dsi_clk_disable();
 
 	/* disbale dsi engine */
 	MIPI_OUTP(MIPI_DSI_BASE + 0x0000, 0);
 
 	mipi_dsi_phy_ctrl(0);
 
-	local_bh_disable();
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 	mipi_dsi_ahb_ctrl(0);
-	local_bh_enable();
+	spin_unlock_bh(&dsi_clk_lock);
 
+	mipi_dsi_unprepare_clocks();
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
+=======
+	mipi_dsi_unprepare_ahb_clocks();
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 	if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
 		mipi_dsi_pdata->dsi_power_save(0);
 
@@ -150,6 +185,8 @@ static int mipi_dsi_off(struct platform_device *pdev)
 		mutex_unlock(&mfd->dma->ov_mutex);
 	else
 		htc_mdp_sem_up(&mfd->dma->mutex);
+
+	pr_debug("%s-:\n", __func__);
 
 	return ret;
 }
@@ -168,24 +205,46 @@ static int mipi_dsi_on(struct platform_device *pdev)
 	u32 dummy_xres, dummy_yres;
 	int target_type = 0;
 
-	PR_DISP_DEBUG(" %s\n", __func__);
+	printk("%s+:\n", __func__);
 
 	mfd = platform_get_drvdata(pdev);
 	fbi = mfd->fbi;
 	var = &fbi->var;
 	pinfo = &mfd->panel_info;
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
+	esc_byte_ratio = pinfo->mipi.esc_byte_ratio;
 
-	if (mfd->init_mipi_lcd != 0) {
+
+	if (mfd->first_init_lcd == 0) {
 		if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
 			mipi_dsi_pdata->dsi_power_save(1);
 	}
 
-	local_bh_disable();
+	cont_splash_clk_ctrl(0);
+	mipi_dsi_prepare_clocks();
+
+=======
+
+	if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
+		mipi_dsi_pdata->dsi_power_save(1);
+
+	cont_splash_clk_ctrl(0);
+	mipi_dsi_prepare_ahb_clocks();
+
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 	mipi_dsi_ahb_ctrl(1);
-	local_bh_enable();
 
 	clk_rate = mfd->fbi->var.pixclock;
 	clk_rate = min(clk_rate, mfd->panel_info.clk_max);
+
+	mipi_dsi_phy_ctrl(1);
+
+	if (mdp_rev == MDP_REV_42 && mipi_dsi_pdata)
+		target_type = mipi_dsi_pdata->target_type;
+
+	mipi_dsi_phy_init(0, &(mfd->panel_info), target_type);
+
+	mipi_dsi_clk_enable();
 
 	MIPI_OUTP(MIPI_DSI_BASE + 0x114, 1);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x114, 0);
@@ -199,21 +258,10 @@ static int mipi_dsi_on(struct platform_device *pdev)
 	width = mfd->panel_info.xres;
 	height = mfd->panel_info.yres;
 
-	mipi_dsi_phy_ctrl(1);
-
-	if (mdp_rev == MDP_REV_42 && mipi_dsi_pdata)
-		target_type = mipi_dsi_pdata->target_type;
-
-	mipi_dsi_phy_init(0, &(mfd->panel_info), target_type);
-
-	local_bh_disable();
-	mipi_dsi_clk_enable();
-	local_bh_enable();
-
 	mipi  = &mfd->panel_info.mipi;
 	if (mfd->panel_info.type == MIPI_VIDEO_PANEL) {
-		dummy_xres = mfd->panel_info.mipi.xres_pad;
-		dummy_yres = mfd->panel_info.mipi.yres_pad;
+		dummy_xres = mfd->panel_info.lcdc.xres_pad;
+		dummy_yres = mfd->panel_info.lcdc.yres_pad;
 
 		if (mdp_rev >= MDP_REV_41) {
 			MIPI_OUTP(MIPI_DSI_BASE + 0x20,
@@ -227,8 +275,14 @@ static int mipi_dsi_on(struct platform_device *pdev)
 					vfp - 1) << 16 | (hspw + hbp +
 					width + dummy_xres + hfp - 1));
 		} else {
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
+			
+			MIPI_OUTP(MIPI_DSI_BASE + 0x00ac,
+						mipi_dsi_pdata->dlane_swap);
+=======
 			/* DSI_LAN_SWAP_CTRL */
 			MIPI_OUTP(MIPI_DSI_BASE + 0x00ac, mipi->dlane_swap);
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 
 			MIPI_OUTP(MIPI_DSI_BASE + 0x20,
 				((hbp + width + dummy_xres) << 16 | (hbp)));
@@ -266,7 +320,7 @@ static int mipi_dsi_on(struct platform_device *pdev)
 		MIPI_OUTP(MIPI_DSI_BASE + 0x58, data);
 	}
 
-	mipi_dsi_host_init(mipi);
+	mipi_dsi_host_init(mipi, mipi_dsi_pdata->dlane_swap);
 
 	if (mipi->force_clk_lane_hs) {
 		u32 tmp;
@@ -277,13 +331,30 @@ static int mipi_dsi_on(struct platform_device *pdev)
 		wmb();
 	}
 
-	/* PrimoDS/DD sharp panel workaround to fix the abnormal wave form  */
-	if ((panel_type == PANEL_ID_PRIMODS_SHARP || panel_type == PANEL_ID_PRIMODS_SHARP_C1 ||
-		panel_type == PANEL_ID_PRIMODD_SHARP || panel_type == PANEL_ID_PRIMODD_SHARP_C1) &&
-		mfd->init_mipi_lcd == 0) {
-		mipi_orise_lcd_pre_off(pdev);
+#if defined(CONFIG_MACH_DUMMY)
+	if ((panel_type == PANEL_ID_PROTODCG_SHARP || panel_type == PANEL_ID_PROTODCG_SHARP_C1) &&
+		mfd->first_init_lcd != 0) {
+		protodcg_orise_lcd_pre_off(pdev);
 		if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
 			mipi_dsi_pdata->dsi_power_save(1);
+	}
+#elif defined(CONFIG_MACH_PROTOU)
+	if ((panel_type == PANEL_ID_PROTOU_SHARP || panel_type == PANEL_ID_PROTOU_SHARP_C1) &&
+		mfd->first_init_lcd != 0) {
+		
+		protou_orise_lcd_pre_off(pdev);
+		if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
+			mipi_dsi_pdata->dsi_power_save(1);
+	}
+#endif
+	if (panel_type == PANEL_ID_URANUS_SONY_ORISE) {
+		if(mfd->first_init_lcd != 0) {
+			if (mipi_dsi_pdata && mipi_dsi_pdata->lcd_pre_off)
+				mipi_dsi_pdata->lcd_pre_off(pdev);
+			if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
+				mipi_dsi_pdata->dsi_power_save(1);
+		}
+
 	}
 
 	ret = panel_next_on(pdev);
@@ -335,6 +406,7 @@ static int mipi_dsi_on(struct platform_device *pdev)
 			}
 			mipi_dsi_set_tear_on(mfd);
 		}
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
 	}
 
 #ifdef CONFIG_MSM_BUS_SCALING
@@ -342,10 +414,33 @@ static int mipi_dsi_on(struct platform_device *pdev)
 #endif
 
 	mdp4_overlay_dsi_state_set(ST_DSI_RESUME);
+=======
+		mipi_dsi_clk_disable();
+		mipi_dsi_unprepare_clocks();
+		mipi_dsi_ahb_ctrl(0);
+		mipi_dsi_unprepare_ahb_clocks();
+	}
+
+	if (mdp_rev >= MDP_REV_41)
+		mutex_unlock(&mfd->dma->ov_mutex);
+	else
+		up(&mfd->dma->mutex);
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 
 	pr_debug("%s-:\n", __func__);
 
 	return ret;
+}
+
+static int mipi_dsi_early_off(struct platform_device *pdev)
+{
+	return panel_next_early_off(pdev);
+}
+
+
+static int mipi_dsi_late_init(struct platform_device *pdev)
+{
+	return panel_next_late_init(pdev);
 }
 
 
@@ -389,14 +484,14 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 
 		dsi_irq = platform_get_irq(pdev, 0);
 		if (dsi_irq < 0) {
-			PR_DISP_ERR("mipi_dsi: can not get mdp irq\n");
+			pr_err("mipi_dsi: can not get mdp irq\n");
 			return -ENOMEM;
 		}
 
 		rc = request_irq(dsi_irq, mipi_dsi_isr, IRQF_DISABLED,
 						"MIPI_DSI", 0);
 		if (rc) {
-			PR_DISP_ERR("mipi_dsi_host request_irq() failed!\n");
+			pr_err("mipi_dsi_host request_irq() failed!\n");
 			return rc;
 		}
 
@@ -412,11 +507,11 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 			periph_base = ioremap(MMSS_SERDES_BASE_PHY, 0x100);
 
 			if (periph_base) {
-				PR_DISP_DEBUG("periph_base %p\n", periph_base);
+				pr_debug("periph_base %p\n", periph_base);
 				writel(0x4, periph_base + 0x28);
 				writel(0xc, periph_base + 0x28);
 			} else {
-				PR_DISP_ERR("periph_base is NULL\n");
+				pr_err("periph_base is NULL\n");
 				free_irq(dsi_irq, 0);
 				return -ENOMEM;
 			}
@@ -424,26 +519,36 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 
 		if (mipi_dsi_pdata) {
 			vsync_gpio = mipi_dsi_pdata->vsync_gpio;
-			PR_DISP_DEBUG("%s: vsync_gpio=%d\n", __func__, vsync_gpio);
+			pr_debug("%s: vsync_gpio=%d\n", __func__, vsync_gpio);
 
 			if (mdp_rev == MDP_REV_303 &&
 				mipi_dsi_pdata->dsi_client_reset) {
-				if (mipi_dsi_pdata->dsi_client_reset()) {
-					PR_DISP_ERR("%s: DSI Client Reset failed!\n",
+				if (mipi_dsi_pdata->dsi_client_reset())
+					pr_err("%s: DSI Client Reset failed!\n",
 						__func__);
-				} else {
-					PR_DISP_DEBUG("%s: DSI Client Reset success\n",
+				else
+					pr_debug("%s: DSI Client Reset success\n",
 						__func__);
-				}
 			}
 		}
 
+		if (mipi_dsi_clk_init(pdev))
+			return -EPERM;
+
+		if (mipi_dsi_pdata->splash_is_enabled &&
+			!mipi_dsi_pdata->splash_is_enabled()) {
+			mipi_dsi_prepare_ahb_clocks();
+			mipi_dsi_ahb_ctrl(1);
+			MIPI_OUTP(MIPI_DSI_BASE + 0x118, 0);
+			MIPI_OUTP(MIPI_DSI_BASE + 0x0, 0);
+			MIPI_OUTP(MIPI_DSI_BASE + 0x200, 0);
+			mipi_dsi_ahb_ctrl(0);
+			mipi_dsi_unprepare_ahb_clocks();
+		}
 		mipi_dsi_resource_initialized = 1;
 
 		return 0;
 	}
-
-	mipi_dsi_clk_init(&pdev->dev);
 
 	if (!mipi_dsi_resource_initialized)
 		return -EPERM;
@@ -458,7 +563,6 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 
 	if (pdev_list_cnt >= MSM_FB_MAX_DEV_LIST)
 		return -ENOMEM;
-
 
 	mdp_dev = platform_device_alloc("mdp", pdev->id);
 	if (!mdp_dev)
@@ -475,7 +579,7 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	if (platform_device_add_data
 	    (mdp_dev, pdev->dev.platform_data,
 	     sizeof(struct msm_fb_panel_data))) {
-		PR_DISP_ERR("mipi_dsi_probe: platform_device_add_data failed!\n");
+		pr_err("mipi_dsi_probe: platform_device_add_data failed!\n");
 		platform_device_put(mdp_dev);
 		return -ENOMEM;
 	}
@@ -485,6 +589,9 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	pdata = mdp_dev->dev.platform_data;
 	pdata->on = mipi_dsi_on;
 	pdata->off = mipi_dsi_off;
+	pdata->fps_level_change = mipi_dsi_fps_level_change;
+	pdata->late_init = mipi_dsi_late_init;
+	pdata->early_off = mipi_dsi_early_off;
 	pdata->next = pdev;
 
 	/*
@@ -555,15 +662,15 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 
 	if (mfd->panel_info.type == MIPI_VIDEO_PANEL &&
 		!mfd->panel_info.clk_rate) {
-		h_period += mfd->panel_info.mipi.xres_pad;
-		v_period += mfd->panel_info.mipi.yres_pad;
+		h_period += mfd->panel_info.lcdc.xres_pad;
+		v_period += mfd->panel_info.lcdc.yres_pad;
 
 		if (lanes > 0) {
 			mfd->panel_info.clk_rate =
 			((h_period * v_period * (mipi->frame_rate) * bpp * 8)
 			   / lanes);
 		} else {
-			PR_DISP_ERR("%s: forcing mipi_dsi lanes to 1\n", __func__);
+			pr_err("%s: forcing mipi_dsi lanes to 1\n", __func__);
 			mfd->panel_info.clk_rate =
 				(h_period * v_period
 					 * (mipi->frame_rate) * bpp * 8);
@@ -575,7 +682,12 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	if (rc)
 		goto mipi_dsi_probe_err;
 
+<<<<<<< HEAD:drivers/video/msm_7x27A/mipi_dsi.c
 	if ((dsi_pclk_rate < 3300000) || (dsi_pclk_rate > 103300000))
+=======
+	if ((dsi_pclk_rate < 3300000) || (dsi_pclk_rate > 223000000)) {
+		pr_err("%s: Pixel clock not supported\n", __func__);
+>>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable:drivers/video/msm/mipi_dsi.c
 		dsi_pclk_rate = 35000000;
 	mipi->dsi_pclk_rate = dsi_pclk_rate;
 
@@ -593,7 +705,12 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 
 	pdev_list[pdev_list_cnt++] = pdev;
 
-	return 0;
+	esc_byte_ratio = pinfo->mipi.esc_byte_ratio;
+
+	if (!mfd->cont_splash_done)
+		cont_splash_clk_ctrl(1);
+
+return 0;
 
 mipi_dsi_probe_err:
 	platform_device_put(mdp_dev);
@@ -625,7 +742,7 @@ static int __init mipi_dsi_driver_init(void)
 	device_initialize(&dsi_dev);
 
 	if (ret) {
-		PR_DISP_ERR("mipi_dsi_register_driver() failed!\n");
+		pr_err("mipi_dsi_register_driver() failed!\n");
 		return ret;
 	}
 
