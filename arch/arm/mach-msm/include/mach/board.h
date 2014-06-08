@@ -546,15 +546,12 @@ struct mipi_dsi_panel_platform_data {
 	int *gpio;
 	struct mipi_dsi_phy_ctrl *phy_ctrl_settings;
 	void (*dsi_pwm_cfg)(void);
-<<<<<<< HEAD
-=======
 	char enable_wled_bl_ctrl;
 	void (*gpio_set_backlight)(int bl_level);
 };
 
 struct lvds_panel_platform_data {
 	int *gpio;
->>>>>>> 79fa449... msm_fb: Import from CAF kk_2.7-stable
 };
 
 
