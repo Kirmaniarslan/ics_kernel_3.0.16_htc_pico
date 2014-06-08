@@ -73,7 +73,7 @@
 
 /* Size must be power of 2 */
 #define MAX_BUF 2
-#define BUFSZ (523200)/* for effect processing needs 1200N, original (524288) */
+#define BUFSZ (524288)
 
 #define AUDDEC_DEC_PCM 0
 
@@ -222,19 +222,6 @@ struct audio {
 	int buffer_count;
 	int buffer_size;
 };
-
-struct audio *audio_stop;
-
-struct ioctl_stop_info {
-	wait_queue_head_t	ioctl_stop_wait;
-	unsigned 		ioctl_stop_state;
-};
-
-static struct ioctl_stop_info ioctl_stop_info;
-
-static struct workqueue_struct *ioctl_stop_queue;
-static void ioctl_stop_work(struct work_struct *work);
-static DECLARE_WORK(ioctl_stop_queue_work, ioctl_stop_work);
 
 static int auddec_dsp_config(struct audio *audio, int enable);
 static void audpp_cmd_cfg_adec_params(struct audio *audio);
@@ -477,7 +464,8 @@ static int auddec_dsp_config(struct audio *audio, int enable)
 	cfg_dec_cmd[0] = AUDPP_CMD_CFG_DEC_TYPE;
 	if (enable)
 		cfg_dec_cmd[1 + audio->dec_id] = AUDPP_CMD_UPDATDE_CFG_DEC |
-				AUDPP_CMD_ENA_DEC_V | AUDDEC_DEC_PCM;
+				AUDPP_CMD_ENA_DEC_V | AUDDEC_DEC_PCM |
+				AUDPP_CMD_LPA_MODE;
 	else
 		cfg_dec_cmd[1 + audio->dec_id] = AUDPP_CMD_UPDATDE_CFG_DEC |
 				AUDPP_CMD_DIS_DEC_V;
@@ -552,7 +540,6 @@ static void audpcm_async_send_data(struct audio *audio, unsigned needed)
 				/* complete writes to the input buffer */
 				wmb();
 				audplay_send_queue0(audio, &cmd, sizeof(cmd));
-				MM_DBG("send data done\n");
 				audio->out_needed = 0;
 				audio->drv_status |= ADRV_STATUS_OBUF_GIVEN;
 			}
@@ -567,9 +554,7 @@ static void audpcm_async_flush(struct audio *audio)
 	struct audpcm_buffer_node *buf_node;
 	struct list_head *ptr, *next;
 	union msm_audio_event_payload payload;
-	unsigned long flags;
 
-	spin_lock_irqsave(&audio->dsp_lock, flags);
 	MM_DBG("\n"); /* Macro prints the file name and function */
 	list_for_each_safe(ptr, next, &audio->out_queue) {
 		buf_node = list_entry(ptr, struct audpcm_buffer_node, list);
@@ -578,14 +563,10 @@ static void audpcm_async_flush(struct audio *audio)
 		audpcm_post_event(audio, AUDIO_EVENT_WRITE_DONE,
 				payload);
 		kfree(buf_node);
-		MM_DBG("WRITE EVENT DONE posting done\n");
 	}
-	MM_DBG("audpcm_async_flush completed\n");
 	audio->drv_status &= ~ADRV_STATUS_OBUF_GIVEN;
 	audio->out_needed = 0;
 	atomic_set(&audio->out_bytes, 0);
-	spin_unlock_irqrestore(&audio->dsp_lock, flags);
-	MM_DBG("Exit\n"); /* Macro prints the file name and function */
 }
 static void audio_ioport_reset(struct audio *audio)
 {
@@ -619,12 +600,9 @@ static int audpcm_events_pending(struct audio *audio)
 	unsigned long flags;
 	int empty;
 
-	MM_DBG("++\n");
 	spin_lock_irqsave(&audio->event_queue_lock, flags);
 	empty = !list_empty(&audio->event_queue);
 	spin_unlock_irqrestore(&audio->event_queue_lock, flags);
-	MM_DBG("--, empty %d, audio->event_abort %d\n",
-			empty, audio->event_abort);
 	return empty || audio->event_abort;
 }
 
@@ -703,7 +681,6 @@ static long audpcm_process_event_req(struct audio *audio, void __user *arg)
 		audlpa_pmem_fixup(audio, drv_evt->payload.aio_buf.buf_addr,
 				  drv_evt->payload.aio_buf.buf_len, 0);
 		mutex_unlock(&audio->lock);
-		MM_DBG("returning AUDIO_EVENT_WRITE_DONE");
 	}
 	if (!rc && copy_to_user(arg, &usr_evt, sizeof(usr_evt)))
 		rc = -EFAULT;
@@ -914,40 +891,6 @@ static int audlpa_aio_buf_add(struct audio *audio, unsigned dir,
 	return 0;
 }
 
-static void ioctl_stop_work(struct work_struct *work)
-{
-	int rc = 0;
-
-	rc = audio_disable(audio_stop);
-	audio_ioport_reset(audio_stop);
-	audio_stop->stopped = 0;
-	ioctl_stop_info.ioctl_stop_state = 1;
-	wake_up(&ioctl_stop_info.ioctl_stop_wait);
-}
-
-static int audio_stop_event(struct audio *audio)
-{
-	int rc = 0;
-
-	init_waitqueue_head(&ioctl_stop_info.ioctl_stop_wait);
-
-	audio_stop = audio;
-
-	queue_work(ioctl_stop_queue, &ioctl_stop_queue_work);
-
-	rc = wait_event_timeout(ioctl_stop_info.ioctl_stop_wait,
-			ioctl_stop_info.ioctl_stop_state == 1,
-			3 * HZ);
-	MM_DBG("+++++ rc = %d\n", rc);
-	if (rc == 0) {
-		MM_ERR("audio stop timeout\n");
-		/* BUG();*/
-		return -ETIMEDOUT;
-	}
-
-	return 0;
-}
-
 static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct audio *audio = file->private_data;
@@ -987,7 +930,6 @@ static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			mutex_unlock(&audio->get_event_lock);
 		} else
 			rc = -EBUSY;
-		MM_DBG("AUDIO_GET_EVENT Done, rc = %d\n", rc);
 		return rc;
 	}
 
@@ -1015,10 +957,10 @@ static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case AUDIO_STOP:
-		MM_DBG("AUDIO_STOP ++\n");
-		ioctl_stop_info.ioctl_stop_state = 0;
-		audio_stop_event(audio);
-		MM_DBG("AUDIO_STOP --\n");
+		MM_DBG("AUDIO_STOP\n");
+		rc = audio_disable(audio);
+		audio_ioport_reset(audio);
+		audio->stopped = 0;
 		break;
 	case AUDIO_FLUSH:
 		MM_DBG("AUDIO_FLUSH\n");
@@ -1135,7 +1077,6 @@ static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		rc = -EINVAL;
 	}
 	mutex_unlock(&audio->lock);
-	MM_DBG("cmd = %d done, rc = %d\n", cmd, rc);
 	return rc;
 }
 
@@ -1170,7 +1111,6 @@ int audlpa_async_fsync(struct audio *audio)
 	mutex_lock(&audio->lock);
 	audio->drv_status &= ~ADRV_STATUS_FSYNC;
 	mutex_unlock(&audio->lock);
-	MM_DBG("Done\n");
 
 	return rc;
 }
@@ -1300,7 +1240,6 @@ static void audpcm_post_event(struct audio *audio, int type,
 	struct audpcm_event *e_node = NULL;
 	unsigned long flags;
 
-	MM_DBG("++\n");
 	spin_lock_irqsave(&audio->event_queue_lock, flags);
 
 	if (!list_empty(&audio->free_event_queue)) {
@@ -1322,7 +1261,6 @@ static void audpcm_post_event(struct audio *audio, int type,
 	list_add_tail(&e_node->list, &audio->event_queue);
 	spin_unlock_irqrestore(&audio->event_queue_lock, flags);
 	wake_up(&audio->event_wait);
-	MM_DBG("--\n");
 }
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -1542,13 +1480,6 @@ struct miscdevice audio_lpa_misc = {
 
 static int __init audio_init(void)
 {
-	ioctl_stop_queue =
-		create_singlethread_workqueue("msm_pcm_lp_dec");
-	if (!ioctl_stop_queue) {
-		MM_ERR("create audio_lpa workqueue failed\n");
-		return -ENOMEM;
-	}
-
 	return misc_register(&audio_lpa_misc);
 }
 

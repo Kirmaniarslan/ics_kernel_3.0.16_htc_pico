@@ -13,7 +13,7 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
-#include <linux/msm_kgsl.h>
+#include <mach/kgsl.h>
 #include <linux/regulator/machine.h>
 #include <mach/irqs.h>
 #include <mach/msm_iomap.h>
@@ -649,7 +649,7 @@ static struct platform_device msm_lcdc_device = {
 	.name   = "lcdc",
 	.id     = 0,
 };
-#ifdef CONFIG_MSM_KGSL_ADRENO200
+
 static struct resource kgsl_3d0_resources[] = {
 	{
 		.name  = KGSL_3D0_REG_MEMORY,
@@ -709,7 +709,7 @@ void __init msm7x25a_kgsl_3d0_init(void)
 		kgsl_3d0_pdata.pwrlevel[1].bus_freq = 0;
 	}
 }
-#endif
+
 static void __init msm_register_device(struct platform_device *pdev, void *data)
 {
 	int ret;

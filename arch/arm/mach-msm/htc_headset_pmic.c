@@ -18,18 +18,13 @@
  */
 
 #include <linux/gpio.h>
-#include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
 #include <linux/slab.h>
-#include <linux/hrtimer.h>
 
 #include <linux/mfd/pm8xxx/core.h>
-#if defined(CONFIG_CPLD)
-#include <linux/i2c/cpld.h>
-#endif
 
 #include <mach/msm_rpcrouter.h>
 
@@ -44,9 +39,7 @@
 
 static struct workqueue_struct *detect_wq;
 static void detect_pmic_work_func(struct work_struct *work);
-#if defined(CONFIG_CPLD)
-static void detect_cpld_work_func(struct work_struct *work);
-#endif
+static DECLARE_DELAYED_WORK(detect_pmic_work, detect_pmic_work_func);
 
 static void irq_init_work_func(struct work_struct *work);
 static DECLARE_DELAYED_WORK(irq_init_work, irq_init_work_func);
@@ -54,50 +47,31 @@ static DECLARE_DELAYED_WORK(irq_init_work, irq_init_work_func);
 static struct workqueue_struct *button_wq;
 static void button_pmic_work_func(struct work_struct *work);
 static DECLARE_DELAYED_WORK(button_pmic_work, button_pmic_work_func);
-static unsigned int hpin_count_global;
+
 static struct htc_35mm_pmic_info *hi;
-static struct detect_pmic_work_info
-	{
-		struct delayed_work hpin_work;
-		unsigned int intr_count;
-		unsigned int insert;
-	} detect_pmic_work;
 
 #ifdef HTC_HEADSET_CONFIG_MSM_RPC
-#define REGISTER_ADC_RPC_First	msecs_to_jiffies(0)
-#define REGISTER_ADC_RPC_Retry	msecs_to_jiffies(1000)
-#define REGISTER_ADC_RPC_Retry_Times 5
-
-static struct delayed_work register_adc_rpc;
-
 static struct msm_rpc_endpoint *endpoint_adc;
 static struct msm_rpc_endpoint *endpoint_current;
 
 static struct hs_pmic_current_threshold current_threshold_lut[] = {
 	{
-		.adc_max = 14909, 
-		.adc_min = 0, 
+		.adc_max = 14909, /* 0x3A3D */
+		.adc_min = 0, /* 0x0000 */
 		.current_uA = 500,
 	},
 	{
-		.adc_max = 29825, 
-		.adc_min = 14910, 
+		.adc_max = 29825, /* 0x7481 */
+		.adc_min = 14910, /* 0x3A3E */
 		.current_uA = 600,
 	},
 	{
-		.adc_max = 65535, 
-		.adc_min = 29826, 
+		.adc_max = 65535, /* 0xFFFF */
+		.adc_min = 29826, /* 0x7482 */
 		.current_uA = 500,
 	},
 };
 #endif
-
-static enum hrtimer_restart hs_hpin_irq_enable_func(struct hrtimer *timer)
-{
-		HS_LOG("Re-Enable HPIN IRQ");
-		enable_irq(hi->pdata.hpin_irq);
-		return HRTIMER_NORESTART;
-}
 
 static int hs_pmic_hpin_state(void)
 {
@@ -194,7 +168,7 @@ static int hs_pmic_remote_adc_pm8921(int *adc)
 	pm8xxx_adc_mpp_config_read(hi->pdata.adc_mpp, hi->pdata.adc_amux,
 				   &result);
 	*adc = (int) result.physical;
-	*adc = *adc / 1000; 
+	*adc = *adc / 1000; /* uA to mA */
 	HS_LOG("Remote ADC %d (0x%X)", *adc, *adc);
 
 	return 1;
@@ -281,118 +255,39 @@ static void hs_pmic_key_enable(int enable)
 
 static void detect_pmic_work_func(struct work_struct *work)
 {
-	struct detect_pmic_work_info *detect_pmic_work_ptr;
-	detect_pmic_work_ptr = container_of(work, struct detect_pmic_work_info, hpin_work.work);
+	int insert = 0;
 
 	HS_DBG();
 
-	hs_notify_plug_event(detect_pmic_work_ptr->insert, detect_pmic_work_ptr->intr_count);
+	insert = gpio_get_value(hi->pdata.hpin_gpio) ? 0 : 1;
+	hs_notify_plug_event(insert);
 }
 
 static irqreturn_t detect_irq_handler(int irq, void *data)
 {
 	unsigned int irq_mask = IRQF_TRIGGER_HIGH | IRQF_TRIGGER_LOW;
-	unsigned int hpin_count_local;
-	disable_irq_nosync(hi->pdata.hpin_irq);
-	HS_LOG("Disable HPIN IRQ");
-	hrtimer_start(&hi->timer, ktime_set(0, 200*NSEC_PER_MSEC), HRTIMER_MODE_REL);
-	hpin_count_local = hpin_count_global++;
-	detect_pmic_work.insert = gpio_get_value(hi->pdata.hpin_gpio);
-	HS_LOG("HPIN++%d++, value = %d, trigger_type = 0x%x", hpin_count_local, detect_pmic_work.insert, hi->hpin_irq_type);
+
 	hs_notify_hpin_irq();
+
 	HS_DBG();
 
 	if (!(hi->pdata.driver_flag & DRIVER_HS_PMIC_EDGE_IRQ)) {
-		if (hi->hpin_irq_type == IRQF_TRIGGER_LOW)
-			detect_pmic_work.insert = 1;
-		else
-			detect_pmic_work.insert = 0;
 		hi->hpin_irq_type ^= irq_mask;
 		set_irq_type(hi->pdata.hpin_irq, hi->hpin_irq_type);
 	}
 
 	wake_lock_timeout(&hi->hs_wake_lock, HS_WAKE_LOCK_TIMEOUT);
-	detect_pmic_work.intr_count = hpin_count_local;
-	queue_delayed_work(detect_wq, &detect_pmic_work.hpin_work, hi->hpin_debounce);
+	queue_delayed_work(detect_wq, &detect_pmic_work, hi->hpin_debounce);
 
-	HS_LOG("HPIN--%d--, insert = %d, trigger_type = 0x%x", hpin_count_local, detect_pmic_work.insert, hi->hpin_irq_type);
 	return IRQ_HANDLED;
 }
-
-#if defined(CONFIG_CPLD)
-static void detect_cpld_work_func(struct work_struct *work)
-{
-	int insert = 0;
-	struct detect_pmic_work_info *detect_pmic_work_ptr;
-	detect_pmic_work_ptr = container_of(work, struct detect_pmic_work_info, hpin_work.work);
-
-	HS_DBG();
-
-	insert = cpld_gpio_read(CPLD_EXT_GPIO_AUD_HP_IN_INPUT_LEVEL);
-	HS_LOG("cpld_gpio state:%d", insert);
-	if (insert < 0) {
-		HS_LOG("Failed to read cpld gpio");
-		return;
-	}
-
-	if (insert == 0)
-		detect_pmic_work_ptr->insert = 1;
-	else if (insert == 1)
-		detect_pmic_work_ptr->insert = 0;
-	else
-		HS_LOG("wrong cpld gpio value:%d", insert);
-
-	hs_notify_plug_event(detect_pmic_work_ptr->insert, detect_pmic_work_ptr->intr_count);
-}
-
-void detect_cpld_handler(unsigned long data){
-	unsigned int *irq_num = (unsigned int*)data;
-	unsigned int hpin_count_local;
-
-	HS_LOG("Disable HPIN IRQ");
-
-	hpin_count_local = hpin_count_global++;
-	HS_LOG("HPIN++%d++, value = %d, trigger_type = 0x%x", hpin_count_local, detect_pmic_work.insert, hi->hpin_irq_type);
-	hs_notify_hpin_irq();
-	HS_DBG();
-
-
-
-	wake_lock_timeout(&hi->hs_wake_lock, HS_WAKE_LOCK_TIMEOUT);
-	detect_pmic_work.intr_count = hpin_count_local;
-	queue_delayed_work(detect_wq, &detect_pmic_work.hpin_work, hi->hpin_debounce);
-
-	HS_LOG("HPIN--%d--, insert = %d, trigger_type = 0x%x", hpin_count_local, detect_pmic_work.insert, hi->hpin_irq_type);
-	HS_LOG("cpld irq_num %d", *irq_num);
-}
-#endif
 
 static void button_pmic_work_func(struct work_struct *work)
 {
 	HS_DBG();
 	hs_notify_key_irq();
-#if defined (CONFIG_HTC_HEADSET_PMIC_EDGE_BTN)
-	if (hi->pdata.key_irq)
-		enable_irq(hi->pdata.key_irq);
-#endif
 }
-#if defined (CONFIG_HTC_HEADSET_PMIC_EDGE_BTN)
-static void button_irq_set_mode(int mode)
-{
-	int value = 1;
-	HS_DBG();
 
-	hi->key_irq_mode = mode;
-	if (mode == HS_PMIC_BTN_IRQ_EDGE_MODE) {
-		set_irq_type(hi->pdata.key_irq, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING);
-		HS_LOG("set irq as edge trigger mode.");
-	} else { 
-		value = gpio_get_value(hi->pdata.key_gpio);
-		set_irq_type(hi->pdata.key_irq, value ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);
-		HS_LOG("set irq as level trigger mode.");
-	}
-}
-#endif
 static irqreturn_t button_irq_handler(int irq, void *dev_id)
 {
 	unsigned int irq_mask = IRQF_TRIGGER_HIGH | IRQF_TRIGGER_LOW;
@@ -400,35 +295,18 @@ static irqreturn_t button_irq_handler(int irq, void *dev_id)
 	HS_DBG();
 
 	if (!(hi->pdata.driver_flag & DRIVER_HS_PMIC_EDGE_IRQ)) {
-#if defined (CONFIG_HTC_HEADSET_PMIC_EDGE_BTN)
-		if (hi->key_irq_mode == HS_PMIC_BTN_IRQ_LEVEL_MODE) {
-			hi->key_irq_type ^= irq_mask;
-			set_irq_type(hi->pdata.key_irq, hi->key_irq_type);
-		}
-#else
 		hi->key_irq_type ^= irq_mask;
 		set_irq_type(hi->pdata.key_irq, hi->key_irq_type);
-#endif
 	}
 	wake_lock_timeout(&hi->hs_wake_lock, HS_WAKE_LOCK_TIMEOUT);
-#if defined (CONFIG_HTC_HEADSET_PMIC_EDGE_BTN)
-	if (hi->pdata.key_irq)
-		disable_irq_nosync(hi->pdata.key_irq);
-#endif
 	queue_delayed_work(button_wq, &button_pmic_work, HS_JIFFIES_ZERO);
 
 	return IRQ_HANDLED;
 }
 
-#if defined(CONFIG_CPLD)
-unsigned long data_for_isr[6] = {0, 1, 2, 3, 4, 5};
-#endif
 static void irq_init_work_func(struct work_struct *work)
 {
 	unsigned int irq_type = IRQF_TRIGGER_LOW;
-#if defined(CONFIG_CPLD)
-	int insert = 1;
-#endif
 
 	HS_DBG();
 
@@ -442,48 +320,22 @@ static void irq_init_work_func(struct work_struct *work)
 		enable_irq(hi->pdata.hpin_irq);
 	}
 
-#if defined(CONFIG_CPLD)
-	if (hi->pdata.hpin_cpld) {
-		HS_LOG("Enable cpld detect IRQ");
-		if(!cpld_request_irq(CPLD_IRQ_HP, &detect_cpld_handler, data_for_isr+5 ))
-			HS_LOG("Request %d IRQ success!", CPLD_IRQ_HP);
-
-		insert = cpld_gpio_read(CPLD_EXT_GPIO_AUD_HP_IN_INPUT_LEVEL);
-		HS_LOG("init cpld_gpio state:%d", insert);
-		if (insert == 0) {
-			detect_pmic_work.insert = 1;
-			detect_pmic_work.intr_count = hpin_count_global++;
-			hs_notify_plug_event(detect_pmic_work.insert, detect_pmic_work.intr_count);
-		}
-	}
-#endif
-
 	if (hi->pdata.key_gpio) {
 		HS_LOG("Setup button IRQ type");
 		hi->key_irq_type = irq_type;
 		set_irq_type(hi->pdata.key_irq, hi->key_irq_type);
-		if (set_irq_wake(hi->pdata.key_irq, 0) < 0)
-			HS_LOG("Disable remote key irq wake failed");
 	}
 }
 
 static void hs_pmic_key_int_enable(int enable)
 {
-	static int enable_count = 0;
-	if (enable == 1 && enable_count == 0) {
+	if (enable) {
 		enable_irq(hi->pdata.key_irq);
-		enable_count++;
-		if (set_irq_wake(hi->pdata.key_irq, 1) < 0)
-			HS_LOG("Enable remote key irq wake failed");
-		HS_LOG("Enable remote key irq and wake");
-	} else if (enable == 0 && enable_count == 1) {
-		disable_irq_nosync(hi->pdata.key_irq);
-		enable_count--;
-		if (set_irq_wake(hi->pdata.key_irq, 0) < 0)
-			HS_LOG("Disable remote key irq wake failed");
-		HS_LOG("Disable remote key irq and wake");
+		HS_LOG("Enable remote key irq");
+	} else {
+		disable_irq(hi->pdata.key_irq);
+		HS_LOG("Disable remote key irq");
 	}
-	HS_LOG("enable_count = %d", enable_count);
 }
 
 static int hs_pmic_request_irq(unsigned int gpio, unsigned int *irq,
@@ -577,12 +429,6 @@ static void hs_pmic_register(void)
 		notifier.id = HEADSET_REG_KEY_INT_ENABLE;
 		notifier.func = hs_pmic_key_int_enable;
 		headset_notifier_register(&notifier);
-
-#if defined (CONFIG_HTC_HEADSET_PMIC_EDGE_BTN)
-		notifier.id = HEADSET_REG_PMIC_SET_BTN_IRQ_MODE;
-		notifier.func = button_irq_set_mode;
-		headset_notifier_register(&notifier);
-#endif
 	}
 }
 
@@ -592,9 +438,7 @@ static ssize_t pmic_adc_debug_show(struct device *dev,
 	int ret = 0;
 	int adc = 0;
 
-#ifdef HTC_HEADSET_CONFIG_MSM_RPC
 	ret = hs_pmic_remote_adc(&adc);
-#endif
 	HS_DBG("button ADC = %d",adc);
 	return ret;
 }
@@ -613,7 +457,7 @@ int register_attributes(void)
 		hi->pmic_dev = NULL;
 	}
 
-	
+	/*register the attributes */
 	ret = device_create_file(hi->pmic_dev, &dev_attr_pmic_headset_adc);
 	if (ret)
 		goto err_create_pmic_device_file;
@@ -624,91 +468,13 @@ err_create_pmic_device_file:
 	HS_ERR("Failed to register pmic attribute file");
 	return ret;
 }
-
-#ifdef HTC_HEADSET_CONFIG_MSM_RPC
-static void register_adc_rpc_func(struct work_struct *work)
-{
-	static int reg_adc_times=0, register_adc_rpc_ret = 0;
-	uint32_t vers = 0;
-
-	if (hi->pdata.driver_flag & DRIVER_HS_PMIC_RPC_KEY) {
-		
-		endpoint_adc = msm_rpc_connect(HS_RPC_CLIENT_PROG,
-					       HS_RPC_CLIENT_VERS, 0);
-		if (IS_ERR(endpoint_adc)) {
-			if(reg_adc_times<REGISTER_ADC_RPC_Retry_Times)
-				{
-					
-					schedule_delayed_work(&register_adc_rpc, REGISTER_ADC_RPC_Retry);
-					register_adc_rpc_ret=0;
-					reg_adc_times++;
-					HS_LOG("Failed to register ADC RPC client times=%d \n",reg_adc_times);
-				}
-			else
-				{
-					reg_adc_times=REGISTER_ADC_RPC_Retry_Times;
-					register_adc_rpc_ret=1;
-					HS_LOG("Failed to register ADC RPC client over %d times \n",REGISTER_ADC_RPC_Retry_Times);
-				}
-		} else {
-			register_adc_rpc_ret=1;
-			HS_LOG("Register ADC RPC client successfully");
-			}
-	}
-
-	if (hi->pdata.driver_flag & DRIVER_HS_PMIC_DYNAMIC_THRESHOLD) {
-		
-		vers = HS_PMIC_RPC_CLIENT_VERS_3_1;
-		endpoint_current = msm_rpc_connect_compatible(
-				   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
-		if (!endpoint_current) {
-			vers = HS_PMIC_RPC_CLIENT_VERS_2_1;
-			endpoint_current = msm_rpc_connect(
-					   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
-		}
-		if (!endpoint_current) {
-			vers = HS_PMIC_RPC_CLIENT_VERS_1_1;
-			endpoint_current = msm_rpc_connect(
-					   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
-		}
-		if (!endpoint_current) {
-			vers = HS_PMIC_RPC_CLIENT_VERS;
-			endpoint_current = msm_rpc_connect(
-					   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
-		}
-		if (IS_ERR(endpoint_current)) {
-			if(reg_adc_times<REGISTER_ADC_RPC_Retry_Times)
-				{
-					schedule_delayed_work(&register_adc_rpc, REGISTER_ADC_RPC_Retry);
-					register_adc_rpc_ret=0;
-					reg_adc_times++;
-					HS_LOG("Failed to register threshold RPC client times=%d \n",reg_adc_times);
-				}
-			else
-				{
-					reg_adc_times=REGISTER_ADC_RPC_Retry_Times;
-					register_adc_rpc_ret=1;
-					HS_LOG("Failed to register threshold RPC client over %d times \n",REGISTER_ADC_RPC_Retry_Times);
-				}
-		} else {
-			register_adc_rpc_ret=1;
-			HS_LOG("Register threshold RPC client successfully"
-			       " (0x%X)", vers);
-			}
-	}
-	if(register_adc_rpc_ret)
-		{
-			queue_delayed_work(detect_wq, &irq_init_work, HS_JIFFIES_IRQ_INIT);
-			hs_pmic_register();
-			hs_notify_driver_ready(DRIVER_NAME);
-		}
-
-}
-#endif
 static int htc_headset_pmic_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 	struct htc_headset_pmic_platform_data *pdata = pdev->dev.platform_data;
+#ifdef HTC_HEADSET_CONFIG_MSM_RPC
+	uint32_t vers = 0;
+#endif
 
 	HS_LOG("++++++++++++++++++++");
 
@@ -719,7 +485,6 @@ static int htc_headset_pmic_probe(struct platform_device *pdev)
 	hi->pdata.driver_flag = pdata->driver_flag;
 	hi->pdata.hpin_gpio = pdata->hpin_gpio;
 	hi->pdata.hpin_irq = pdata->hpin_irq;
-	hi->pdata.hpin_cpld = pdata->hpin_cpld;
 	hi->pdata.key_gpio = pdata->key_gpio;
 	hi->pdata.key_irq = pdata->key_irq;
 	hi->pdata.key_enable_gpio = pdata->key_enable_gpio;
@@ -729,18 +494,7 @@ static int htc_headset_pmic_probe(struct platform_device *pdev)
 	hi->pdata.hs_switch = pdata->hs_switch;
 	hi->pdata.adc_mic = pdata->adc_mic;
 	hi->htc_accessory_class = hs_get_attribute_class();
-	hpin_count_global = 0;
 	register_attributes();
-
-#if defined(CONFIG_CPLD)
-	if (hi->pdata.hpin_cpld)
-		INIT_DELAYED_WORK(&detect_pmic_work.hpin_work, detect_cpld_work_func);
-	else
-#endif
-		INIT_DELAYED_WORK(&detect_pmic_work.hpin_work, detect_pmic_work_func);
-
-	hrtimer_init(&hi->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	hi->timer.function = hs_hpin_irq_enable_func;
 
 	if (!hi->pdata.adc_mic)
 		hi->pdata.adc_mic = HS_DEF_MIC_ADC_16_BIT_MIN;
@@ -765,9 +519,6 @@ static int htc_headset_pmic_probe(struct platform_device *pdev)
 	hi->hpin_irq_type = IRQF_TRIGGER_NONE;
 	hi->hpin_debounce = HS_JIFFIES_ZERO;
 	hi->key_irq_type = IRQF_TRIGGER_NONE;
-#if defined (CONFIG_HTC_HEADSET_PMIC_EDGE_BTN)
-	hi->key_irq_mode = HS_PMIC_BTN_IRQ_LEVEL_MODE;
-#endif
 
 	wake_lock_init(&hi->hs_wake_lock, WAKE_LOCK_SUSPEND, DRIVER_NAME);
 
@@ -808,17 +559,55 @@ static int htc_headset_pmic_probe(struct platform_device *pdev)
 	}
 
 #ifdef HTC_HEADSET_CONFIG_MSM_RPC
-	INIT_DELAYED_WORK(&register_adc_rpc, register_adc_rpc_func);
-	schedule_delayed_work(&register_adc_rpc, REGISTER_ADC_RPC_First);
+	if (hi->pdata.driver_flag & DRIVER_HS_PMIC_RPC_KEY) {
+		/* Register ADC RPC client */
+		endpoint_adc = msm_rpc_connect(HS_RPC_CLIENT_PROG,
+					       HS_RPC_CLIENT_VERS, 0);
+		if (IS_ERR(endpoint_adc)) {
+			hi->pdata.driver_flag &= ~DRIVER_HS_PMIC_RPC_KEY;
+			HS_LOG("Failed to register ADC RPC client");
+		} else
+			HS_LOG("Register ADC RPC client successfully");
+	}
+
+	if (hi->pdata.driver_flag & DRIVER_HS_PMIC_DYNAMIC_THRESHOLD) {
+		/* Register threshold RPC client */
+		vers = HS_PMIC_RPC_CLIENT_VERS_3_1;
+		endpoint_current = msm_rpc_connect_compatible(
+				   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
+		if (!endpoint_current) {
+			vers = HS_PMIC_RPC_CLIENT_VERS_2_1;
+			endpoint_current = msm_rpc_connect(
+					   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
+		}
+		if (!endpoint_current) {
+			vers = HS_PMIC_RPC_CLIENT_VERS_1_1;
+			endpoint_current = msm_rpc_connect(
+					   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
+		}
+		if (!endpoint_current) {
+			vers = HS_PMIC_RPC_CLIENT_VERS;
+			endpoint_current = msm_rpc_connect(
+					   HS_PMIC_RPC_CLIENT_PROG, vers, 0);
+		}
+		if (IS_ERR(endpoint_current)) {
+			hi->pdata.driver_flag &=
+				~DRIVER_HS_PMIC_DYNAMIC_THRESHOLD;
+			HS_LOG("Failed to register threshold RPC client");
+		} else
+			HS_LOG("Register threshold RPC client successfully"
+			       " (0x%X)", vers);
+	}
 #else
 	hi->pdata.driver_flag &= ~DRIVER_HS_PMIC_RPC_KEY;
 	hi->pdata.driver_flag &= ~DRIVER_HS_PMIC_DYNAMIC_THRESHOLD;
+#endif
 
 	queue_delayed_work(detect_wq, &irq_init_work, HS_JIFFIES_IRQ_INIT);
 
 	hs_pmic_register();
 	hs_notify_driver_ready(DRIVER_NAME);
-#endif
+
 	HS_LOG("--------------------");
 
 	return 0;

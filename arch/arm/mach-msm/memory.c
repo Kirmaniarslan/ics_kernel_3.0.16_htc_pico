@@ -77,7 +77,7 @@ void write_to_strongly_ordered_memory(void)
 		else {
 			printk(KERN_ALERT "Cannot map strongly ordered page in "
 				"Interrupt Context\n");
-			
+
 			BUG();
 		}
 	}
@@ -168,9 +168,9 @@ static unsigned long stable_size(struct membank *mb,
 	if (!unstable_limit)
 		return mb->size;
 
-	
+
 	if (upper_limit >= mb->start) {
-		
+
 		if (upper_limit <= unstable_limit)
 			return mb->size;
 	}
@@ -313,7 +313,7 @@ void __init msm_reserve(void)
 
 static int get_ebi_memtype(void)
 {
-	
+
 	if (cpu_is_msm7x30() || cpu_is_msm8x55())
 		return MEMTYPE_EBI0;
 	return MEMTYPE_EBI1;
@@ -339,7 +339,7 @@ unsigned int msm_ttbr0;
 
 void store_ttbr0(void)
 {
-	
+
 	asm("mrc p15, 0, %0, c2, c0, 0\n"
 		: "=r" (msm_ttbr0));
 }
